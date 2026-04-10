@@ -61,9 +61,9 @@ export class BulletController extends Component {
 
         const otherGroup = other.group;
         const isWall = otherGroup === PhysicsGroups.WALL;
-        const isEnemy = otherGroup === PhysicsGroups.ENEMY;
+        const isMonster = otherGroup === PhysicsGroups.MONSTER;
 
-        if (isWall || isEnemy) {
+        if (isWall || isMonster) {
             this.returnToPool();
         }
     }

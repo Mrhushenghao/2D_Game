@@ -41,7 +41,7 @@ export class TiledMapObjectCollider extends Component {
     collisionGroup: number = PhysicsGroups.WALL;
 
     @property({ tooltip: '是否显示调试区域' })
-    showDebug: boolean = true;
+    showDebug: boolean = false;
 
     @property({ tooltip: '调试区域颜色' })
     debugColor: Color = new Color(255, 0, 0, 100);

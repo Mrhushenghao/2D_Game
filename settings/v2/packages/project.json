@@ -19,13 +19,18 @@
       {
         "index": 3,
         "name": "ladder"
+      },
+      {
+        "index": 4,
+        "name": "monster"
       }
     ],
     "collisionMatrix": {
       "0": 1,
-      "1": 12,
-      "2": 2,
-      "3": 2
+      "1": 28,
+      "2": 18,
+      "3": 2,
+      "4": 6
     }
   },
   "custom_joint_texture_layouts": []

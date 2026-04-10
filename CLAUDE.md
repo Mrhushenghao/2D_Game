@@ -4,13 +4,13 @@
 
 ## 项目概述
 
-这是一个 Cocos Creator 3.8.8 游戏项目，使用 TypeScript 开发。
+Cocos Creator 3.8.8 游戏项目，TypeScript 开发。完整项目结构见 [README.md](README.md)。
 
 ## 技术栈
 
 - **引擎**: Cocos Creator 3.8.8
 - **语言**: TypeScript
-- **项目类型**: 2D/3D 游戏项目
+- **项目类型**: 2D 平台动作游戏
 
 ## 编码规范
 
@@ -26,18 +26,7 @@
 ### Cocos Creator 特定规范
 - 注意 2.x 和 3.x API 差异，本项目使用 3.x API
 - 无需在场景中创建节点和预制体，只需生成代码并说明使用方法
-
-## 项目结构
-
-```
-assets/
-├── scripts/        # TypeScript 脚本
-│   ├── PlayerController.ts   # 玩家控制器
-│   ├── CameraFollow.ts       # 摄像机跟随
-│   ├── TiledMapCollider.ts   # TiledMap 碰撞生成
-│   └── TiledMapFix.ts        # TiledMap 修复
-└── ...            # 其他资源目录
-```
+- 使用修饰器 @property 时需定义类型，如 `@property(Node)`
 
 ## 玩家控制器 (PlayerController)
 
@@ -78,7 +67,6 @@ assets/
 ### 梯子系统
 - 梯子节点只需挂载一个设为 Sensor 的 `BoxCollider2D`，无需额外脚本
 - 接触梯子传感器时 `gravityScale = 0`，离开时恢复为 1
-- 碰撞接触开始即进入梯子区域，碰撞分离即离开
 - 按方向键 W/S 开始攀爬，Space 键主动跳跃脱离
 
 ## 常用 API 注意事项
@@ -102,3 +90,8 @@ assets/
 
 - 图集纹理建议设置 Filter Mode 为 `nearest` 避免黑边和间隙
 - TiledMap 图块间隙问题可通过设置纹理 `WrapMode.CLAMP_TO_EDGE` 缓解
+
+## 设计文档
+
+- [地图碰撞体生成方案](docs/地图方案.md)
+- [碰撞系统实现方案](docs/碰撞系统方案.md)

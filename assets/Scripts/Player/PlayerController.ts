@@ -35,7 +35,7 @@ export class PlayerController extends Component {
     crouchSpeed: number = 80;
 
     @property({ tooltip: '受伤无敌时间（秒）' })
-    invincibleDuration: number = 1.5;
+    invincibleDuration: number = 0.5;
 
     @property({ tooltip: '受伤击退力度' })
     hurtKnockback: number = 200;
@@ -93,9 +93,11 @@ export class PlayerController extends Component {
 
     private readonly _vel = new Vec2();
     private readonly _worldPos = new Vec3();
+    private startPosition = new Vec3();
 
     onLoad() {
         this.rigidBody = this.getComponent(RigidBody2D);
+        this.startPosition.set(this.node.position);
 
         if (!this.rigidBody) {
             console.warn('[Player] 未找到 RigidBody2D');
@@ -108,6 +110,7 @@ export class PlayerController extends Component {
         this.initCollider();
         this.initInput();
         this.initBulletPool();
+        this.initGameManagerEvents();
 
         if (this.showDebug) this.addDebugGraphic();
     }
@@ -120,6 +123,11 @@ export class PlayerController extends Component {
         if (collider) {
             collider.off(Contact2DType.BEGIN_CONTACT, this.onBeginContact, this);
             collider.off(Contact2DType.END_CONTACT, this.onEndContact, this);
+        }
+
+        const gm = GameManager.instance;
+        if (gm) {
+            gm.node.off('player-die', this.onPlayerDie, this);
         }
     }
 
@@ -196,6 +204,7 @@ export class PlayerController extends Component {
     }
 
     private handleVerticalPress(direction: number) {
+        if (this.isInvincible) return;
         if (this.onLadder) {
             this.verticalInput = direction;
             return;
@@ -209,6 +218,7 @@ export class PlayerController extends Component {
     }
 
     private handleDownPress() {
+        if (this.isInvincible) return;
         if (this.onLadder) {
             this.verticalInput = -1;
             return;
@@ -221,21 +231,21 @@ export class PlayerController extends Component {
     // ==================== 移动处理 ====================
 
     private handleMovement() {
-        if (!this.rigidBody) return;
+        if (!this.rigidBody || this.isInvincible) return;
         this._vel.set(this.rigidBody.linearVelocity);
         this._vel.x = this.horizontalInput * this.moveSpeed;
         this.rigidBody.linearVelocity = this._vel;
     }
 
     private handleCrouchMovement() {
-        if (!this.rigidBody) return;
+        if (!this.rigidBody || this.isInvincible) return;
         this._vel.set(this.rigidBody.linearVelocity);
         this._vel.x = this.horizontalInput * this.crouchSpeed;
         this.rigidBody.linearVelocity = this._vel;
     }
 
     private handleClimbMovement() {
-        if (!this.rigidBody) return;
+        if (!this.rigidBody || this.isInvincible) return;
         this._vel.set(
             this.horizontalInput * this.moveSpeed * 0.5,
             this.verticalInput * this.climbSpeed
@@ -244,7 +254,7 @@ export class PlayerController extends Component {
     }
 
     private jump() {
-        if (!this.rigidBody || !this.isGrounded) return;
+        if (!this.rigidBody || !this.isGrounded || this.isInvincible) return;
         this._vel.set(this.rigidBody.linearVelocity);
         this._vel.y = this.jumpForce;
         this.rigidBody.linearVelocity = this._vel;
@@ -284,6 +294,34 @@ export class PlayerController extends Component {
     }
 
     // ==================== 射击 ====================
+
+    private initGameManagerEvents() {
+        const gm = GameManager.instance;
+        if (gm) {
+            gm.node.on('player-die', this.onPlayerDie, this);
+        }
+    }
+
+    private onPlayerDie(hasLives: boolean) {
+        if (!hasLives) return;
+
+        this.isInvincible = false;
+        this.isCrouching = false;
+        this.onLadder = false;
+        this.nearLadder = false;
+
+        if (this.rigidBody) {
+            this.rigidBody.linearVelocity = Vec2.ZERO;
+            this.rigidBody.gravityScale = GRAVITY_NORMAL;
+            (this.rigidBody as any).wakeUp?.();
+        }
+
+        this.scheduleOnce(() => {
+            this.node.setPosition(this.startPosition);
+            this.curState = STATE.idle;
+            this.aniNode?.play(CLIP_NAMES[STATE.idle]);
+        }, 0);
+    }
 
     private initBulletPool() {
         if (!this.bulletPrefab) return;
@@ -355,17 +393,8 @@ export class PlayerController extends Component {
         if (!this.isInvincible) return;
         this.invincibleTimer -= dt;
 
-        // 闪烁效果
-        const blink = Math.floor(this.invincibleTimer * 10) % 2 === 0;
-        this.node.setScale(
-            this.isFacingRight ? 1 : -1,
-            blink ? 1 : 0.5,
-            1
-        );
-
         if (this.invincibleTimer <= 0) {
             this.isInvincible = false;
-            this.node.setScale(this.isFacingRight ? 1 : -1, 1, 1);
         }
     }
 
@@ -386,7 +415,7 @@ export class PlayerController extends Component {
     onBeginContact(_self: Collider2D, other: Collider2D, contact: IPhysics2DContact | null) {
         if (!contact) return;
 
-        if (other.sensor) {
+        if (other.group === PhysicsGroups.LADDER) {
             this.onLadderEnter();
             return;
         }
@@ -400,7 +429,7 @@ export class PlayerController extends Component {
         }
 
         // 敌人碰撞
-        if (otherGroup === PhysicsGroups.ENEMY) {
+        if (otherGroup === PhysicsGroups.MONSTER) {
             this.handleEnemyContact(other, contact);
             return;
         }
@@ -415,7 +444,7 @@ export class PlayerController extends Component {
     onEndContact(_self: Collider2D, other: Collider2D, contact: IPhysics2DContact | null) {
         if (!contact) return;
 
-        if (other.sensor) {
+        if (other.group === PhysicsGroups.LADDER) {
             this.onLadderExit();
             return;
         }
@@ -430,18 +459,20 @@ export class PlayerController extends Component {
         }
     }
 
-    private handleEnemyContact(other: Collider2D, contact: IPhysics2DContact) {
-        const manifold = contact.getWorldManifold();
-        const normalY = manifold?.normal.y ?? 0;
+    private handleEnemyContact(other: Collider2D, _contact: IPhysics2DContact) {
+        const playerY = this.node.worldPosition.y;
+        const enemyY = other.node.worldPosition.y;
+        const velY = this.rigidBody!.linearVelocity.y;
 
-        if (this.rigidBody!.linearVelocity.y <= 0 && normalY > 0.5) {
-            // 踩踏敌人
+        const isAbove = playerY > enemyY + 14;
+        const isFalling = velY < 0;
+
+        if (isAbove && isFalling) {
             other.node.emit('stomped');
             this._vel.set(this.rigidBody!.linearVelocity);
             this._vel.y = this.stompBounce;
             this.rigidBody!.linearVelocity = this._vel;
         } else {
-            // 被敌人碰到
             const enemyX = other.node.worldPosition.x;
             this.takeDamage(enemyX);
         }

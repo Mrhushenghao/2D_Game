@@ -20,7 +20,6 @@ export class PatrolEnemy extends EnemyBase {
     edgeCheckDistance: number = 8;
 
     private moveDir: number = -1;
-    private readonly _vel = new Vec2();
     private readonly _rayEnd = new Vec2();
     private readonly _rayStart = new Vec2();
 
@@ -61,8 +60,7 @@ export class PatrolEnemy extends EnemyBase {
             this.reverse();
         }
 
-        this._vel.set(this.rigidBody.linearVelocity);
-        this._vel.x = this.moveDir * this.patrolSpeed;
+        this._vel.set(this.moveDir * this.patrolSpeed, this.rigidBody.linearVelocity.y);
         this.rigidBody.linearVelocity = this._vel;
 
         this.node.setScale(this.moveDir, 1, 1);

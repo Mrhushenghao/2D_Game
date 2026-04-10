@@ -23,7 +23,7 @@ export class TiledMapCollider extends Component {
     colliderOffset: Vec2 = new Vec2(0, 0);
 
     @property({ tooltip: '是否显示调试区域' })
-    showDebug: boolean = true;
+    showDebug: boolean = false;
 
     @property({ tooltip: '调试区域颜色' })
     debugColor: Color = new Color(255, 0, 0, 128);

@@ -71,7 +71,8 @@ export class GameManager extends Component {
         if (this.lives <= 0) {
             this.gameOver();
         }
-        // 由外部监听处理重生逻辑
+        this.hp = this.maxHp;
+        this.emitDataChange('hp');
         this.node.emit('player-die', this.lives > 0);
     }
 

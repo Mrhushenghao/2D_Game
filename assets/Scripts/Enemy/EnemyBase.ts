@@ -34,7 +34,7 @@ export class EnemyBase extends Component {
     protected isHurt: boolean = false;
 
     private invincibleTimer: number = 0;
-    private readonly _vel = new Vec2();
+    protected _vel = new Vec2();
     private readonly _whiteColor = new Color(255, 255, 255, 255);
     private readonly _transparentWhite = new Color(255, 255, 255, 80);
 
@@ -56,6 +56,9 @@ export class EnemyBase extends Component {
             collider.off(Contact2DType.BEGIN_CONTACT, this.onBeginContact, this);
         }
         this.node.off('stomped', this.onStomped, this);
+        if (this.aniNode) {
+            this.aniNode.off(Animation.EventType.FINISHED, this.onDeathAnimEnd, this);
+        }
     }
 
     update(dt: number) {
@@ -118,13 +121,25 @@ export class EnemyBase extends Component {
 
         if (this.rigidBody) {
             this.rigidBody.linearVelocity = Vec2.ZERO;
-            this.rigidBody.type = ERigidBody2DType.Static;
+            this.rigidBody.gravityScale = 0;
         }
 
-        tween(this.node)
-            .to(0.3, { scale: new Vec3(1.2, 0.1, 1) })
-            .call(() => { if (this.node.isValid) this.node.destroy(); })
-            .start();
+        const collider = this.getComponent(BoxCollider2D);
+        if (collider) collider.sensor = true;
+
+        if (this.aniNode && this.aniNode.getState('death')) {
+            this.aniNode.play('death');
+            this.aniNode.once(Animation.EventType.FINISHED, this.onDeathAnimEnd, this);
+        } else {
+            tween(this.node)
+                .to(0.3, { scale: new Vec3(1.2, 0.1, 1) })
+                .call(() => { if (this.node.isValid) this.node.destroy(); })
+                .start();
+        }
+    }
+
+    private onDeathAnimEnd() {
+        if (this.node.isValid) this.node.destroy();
     }
 
     protected onStompDeath() {
