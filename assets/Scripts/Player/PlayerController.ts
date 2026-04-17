@@ -1,5 +1,5 @@
 import {
-    _decorator, Component, RigidBody2D, BoxCollider2D, Collider2D,
+    _decorator, Component, RigidBody2D, BoxCollider2D, CircleCollider2D, Collider2D,
     ERigidBody2DType, Vec2, Node, Animation, Color, Graphics,
     Contact2DType, IPhysics2DContact, Vec3, Prefab, KeyCode, input, Input
 } from 'cc';
@@ -46,6 +46,9 @@ export class PlayerController extends Component {
     @property({ tooltip: '踩踏弹跳力度' })
     stompBounce: number = 300;
 
+    @property({ tooltip: '脚底圆形半径，用于平滑跨越高低差' })
+    footCircleRadius: number = 6;
+
     @property({ tooltip: '子弹预制体' })
     bulletPrefab: Prefab | null = null;
 
@@ -71,12 +74,13 @@ export class PlayerController extends Component {
     private curState: STATE = STATE.idle;
     private horizontalInput: number = 0;
     private verticalInput: number = 0;
-    private isGrounded: boolean = false;
-    private groundContactCount: number = 0;
-    private canReGround: boolean = true;
+    private canJump: boolean = false;
     private nearLadder: boolean = false;
     private onLadder: boolean = false;
     private isCrouching: boolean = false;
+    private ladderContactCount: number = 0;
+    private ladderCenterX: number = 0;
+    private ladderTopY: number = 0;
 
     // 受伤无敌
     private isInvincible: boolean = false;
@@ -90,6 +94,10 @@ export class PlayerController extends Component {
     // 缓存原始碰撞体尺寸
     private originalColliderHeight: number = 0;
     private originalColliderOffsetY: number = 0;
+
+    // 脚底圆形碰撞体
+    private footCircle: CircleCollider2D | null = null;
+    private effectiveFootR: number = 0;
 
     private readonly _vel = new Vec2();
     private readonly _worldPos = new Vec3();
@@ -108,6 +116,7 @@ export class PlayerController extends Component {
         this.rigidBody.group = PhysicsGroups.HERO;
         this.cacheColliderSize();
         this.initCollider();
+        this.initFootCircle();
         this.initInput();
         this.initBulletPool();
         this.initGameManagerEvents();
@@ -123,6 +132,13 @@ export class PlayerController extends Component {
         if (collider) {
             collider.off(Contact2DType.BEGIN_CONTACT, this.onBeginContact, this);
             collider.off(Contact2DType.END_CONTACT, this.onEndContact, this);
+            collider.off(Contact2DType.PRE_SOLVE, this.onPreSolve, this);
+        }
+
+        if (this.footCircle) {
+            this.footCircle.off(Contact2DType.BEGIN_CONTACT, this.onBeginContact, this);
+            this.footCircle.off(Contact2DType.END_CONTACT, this.onEndContact, this);
+            this.footCircle.off(Contact2DType.PRE_SOLVE, this.onPreSolve, this);
         }
 
         const gm = GameManager.instance;
@@ -135,13 +151,7 @@ export class PlayerController extends Component {
         this.updateInvincible(dt);
         this.updateShootCooldown(dt);
 
-        if (this.onLadder) {
-            this.handleClimbMovement();
-        } else if (this.isCrouching) {
-            this.handleCrouchMovement();
-        } else {
-            this.handleMovement();
-        }
+        this.updateMovement();
         this.updateState();
         this.updateFacing();
         this.clampWorldPosition();
@@ -158,11 +168,11 @@ export class PlayerController extends Component {
         switch (event.keyCode) {
             case KeyCode.KEY_A:
             case KeyCode.ARROW_LEFT:
-                this.horizontalInput = -1;
+                if (!this.onLadder) this.horizontalInput = -1;
                 break;
             case KeyCode.KEY_D:
             case KeyCode.ARROW_RIGHT:
-                this.horizontalInput = 1;
+                if (!this.onLadder) this.horizontalInput = 1;
                 break;
             case KeyCode.KEY_W:
             case KeyCode.ARROW_UP:
@@ -223,43 +233,50 @@ export class PlayerController extends Component {
             this.verticalInput = -1;
             return;
         }
-        if (this.isGrounded && !this.isCrouching) {
+        if (this.nearLadder) {
+            this.enterLadder();
+            this.verticalInput = -1;
+            return;
+        }
+        if (this.canJump && !this.isCrouching) {
             this.crouch();
         }
     }
 
     // ==================== 移动处理 ====================
 
-    private handleMovement() {
+    private updateMovement() {
         if (!this.rigidBody || this.isInvincible) return;
         this._vel.set(this.rigidBody.linearVelocity);
-        this._vel.x = this.horizontalInput * this.moveSpeed;
-        this.rigidBody.linearVelocity = this._vel;
-    }
 
-    private handleCrouchMovement() {
-        if (!this.rigidBody || this.isInvincible) return;
-        this._vel.set(this.rigidBody.linearVelocity);
-        this._vel.x = this.horizontalInput * this.crouchSpeed;
-        this.rigidBody.linearVelocity = this._vel;
-    }
+        if (this.onLadder) {
+            this.node.getWorldPosition(this._worldPos);
+            this._worldPos.x = this.ladderCenterX;
+            this.node.setWorldPosition(this._worldPos);
+            this._vel.x = 0;
+            this._vel.y = this.verticalInput * this.climbSpeed;
+            if (this.verticalInput > 0 && this.node.worldPosition.y >= this.ladderTopY) {
+                this.snapToLadderTop();
+                return;
+            }
+        } else {
+            const speed = this.isCrouching ? this.crouchSpeed : this.moveSpeed;
+            this._vel.x = this.horizontalInput * speed;
+            if (this.canJump && this._vel.y > 0 && this.horizontalInput !== 0) {
+                this._vel.x += this._vel.y * this.horizontalInput;
+            }
+            if (this.canJump) this._vel.y = Math.min(this._vel.y, 0);
+        }
 
-    private handleClimbMovement() {
-        if (!this.rigidBody || this.isInvincible) return;
-        this._vel.set(
-            this.horizontalInput * this.moveSpeed * 0.5,
-            this.verticalInput * this.climbSpeed
-        );
         this.rigidBody.linearVelocity = this._vel;
     }
 
     private jump() {
-        if (!this.rigidBody || !this.isGrounded || this.isInvincible) return;
+        if (!this.rigidBody || !this.canJump || this.isInvincible) return;
         this._vel.set(this.rigidBody.linearVelocity);
         this._vel.y = this.jumpForce;
         this.rigidBody.linearVelocity = this._vel;
-        this.isGrounded = false;
-        this.canReGround = false;
+        this.canJump = false;
         if (this.isCrouching) this.standUp();
     }
 
@@ -277,8 +294,9 @@ export class PlayerController extends Component {
         this.isCrouching = true;
         const collider = this.getComponent(BoxCollider2D);
         if (collider) {
-            collider.size.height = this.originalColliderHeight * 0.6;
-            collider.offset.y = this.originalColliderOffsetY - this.originalColliderHeight * 0.2;
+            const r = this.effectiveFootR;
+            collider.size.height = this.originalColliderHeight * 0.6 - 2 * r;
+            collider.offset.y = this.originalColliderOffsetY - this.originalColliderHeight * 0.2 + r;
             collider.apply();
         }
     }
@@ -287,10 +305,38 @@ export class PlayerController extends Component {
         this.isCrouching = false;
         const collider = this.getComponent(BoxCollider2D);
         if (collider) {
-            collider.size.height = this.originalColliderHeight;
-            collider.offset.y = this.originalColliderOffsetY;
+            const r = this.effectiveFootR;
+            collider.size.height = this.originalColliderHeight - 2 * r;
+            collider.offset.y = this.originalColliderOffsetY + r;
             collider.apply();
         }
+    }
+
+    private initFootCircle() {
+        const collider = this.getComponent(BoxCollider2D);
+        if (!collider) return;
+
+        const r = Math.min(this.footCircleRadius, this.originalColliderHeight * 0.25);
+        if (r <= 0) return;
+        this.effectiveFootR = r;
+
+        // 缩短 BoxCollider2D 底部，由圆形替代
+        collider.size.height = this.originalColliderHeight - 2 * r;
+        collider.offset.y = this.originalColliderOffsetY + r;
+        collider.apply();
+
+        // 创建脚底圆形碰撞体
+        this.footCircle = this.node.addComponent(CircleCollider2D);
+        this.footCircle.radius = r;
+        this.footCircle.offset = new Vec2(
+            0,
+            this.originalColliderOffsetY - this.originalColliderHeight / 2 + r
+        );
+        this.footCircle.group = PhysicsGroups.HERO;
+        this.footCircle.on(Contact2DType.BEGIN_CONTACT, this.onBeginContact, this);
+        this.footCircle.on(Contact2DType.END_CONTACT, this.onEndContact, this);
+        this.footCircle.on(Contact2DType.PRE_SOLVE, this.onPreSolve, this);
+        this.footCircle.apply();
     }
 
     // ==================== 射击 ====================
@@ -354,12 +400,10 @@ export class PlayerController extends Component {
     enterLadder() {
         if (this.onLadder) return;
         this.onLadder = true;
-        if (this.verticalInput !== 0) {
-            this.rigidBody!.gravityScale = GRAVITY_LADDER;
-            this._vel.set(this.rigidBody!.linearVelocity);
-            this._vel.y = 0;
-            this.rigidBody!.linearVelocity = this._vel;
-        }
+        this.rigidBody!.gravityScale = GRAVITY_LADDER;
+        this._vel.set(this.rigidBody!.linearVelocity);
+        this._vel.y = 0;
+        this.rigidBody!.linearVelocity = this._vel;
     }
 
     exitLadder() {
@@ -367,6 +411,13 @@ export class PlayerController extends Component {
         this.onLadder = false;
         this.verticalInput = 0;
         if (this.rigidBody) this.rigidBody.gravityScale = GRAVITY_NORMAL;
+    }
+
+    private snapToLadderTop() {
+        this.node.getWorldPosition(this._worldPos);
+        this._worldPos.y = this.ladderTopY + 1;
+        this.node.setWorldPosition(this._worldPos);
+        this.exitLadder();
     }
 
     // ==================== 受伤 & 无敌 ====================
@@ -379,6 +430,7 @@ export class PlayerController extends Component {
 
         this.isInvincible = true;
         this.invincibleTimer = this.invincibleDuration;
+        this.canJump = false;
 
         // 击退
         const knockDir = this.node.worldPosition.x < fromX ? -1 : 1;
@@ -409,6 +461,7 @@ export class PlayerController extends Component {
         collider.group = PhysicsGroups.HERO;
         collider.on(Contact2DType.BEGIN_CONTACT, this.onBeginContact, this);
         collider.on(Contact2DType.END_CONTACT, this.onEndContact, this);
+        collider.on(Contact2DType.PRE_SOLVE, this.onPreSolve, this);
         collider.apply();
     }
 
@@ -416,7 +469,15 @@ export class PlayerController extends Component {
         if (!contact) return;
 
         if (other.group === PhysicsGroups.LADDER) {
+            this.ladderContactCount++;
+            const box = other as BoxCollider2D;
+            const otherPos = other.node.worldPosition;
+            this.ladderCenterX = otherPos.x + box.offset.x;
+            this.ladderTopY = otherPos.y + box.offset.y + box.size.height / 2;
             this.onLadderEnter();
+            if (!this.onLadder && this.rigidBody && this.rigidBody.linearVelocity.y <= 0) {
+                this.canJump = true;
+            }
             return;
         }
 
@@ -434,10 +495,9 @@ export class PlayerController extends Component {
             return;
         }
 
-        // 地面/墙壁
-        if (otherGroup === PhysicsGroups.WALL) {
-            this.groundContactCount++;
-            if (this.canReGround) this.isGrounded = true;
+        // 地面/墙壁：上升阶段不接地，防止跳跃瞬间碰到新碰撞体导致 canJump 被重置
+        if (otherGroup === PhysicsGroups.WALL && this.rigidBody && this.rigidBody.linearVelocity.y <= 0) {
+            this.canJump = true;
         }
     }
 
@@ -445,17 +505,28 @@ export class PlayerController extends Component {
         if (!contact) return;
 
         if (other.group === PhysicsGroups.LADDER) {
-            this.onLadderExit();
+            this.ladderContactCount--;
+            if (this.ladderContactCount <= 0) {
+                this.ladderContactCount = 0;
+                this.onLadderExit();
+            }
+        }
+    }
+
+    onPreSolve(_self: Collider2D, other: Collider2D, contact: IPhysics2DContact | null) {
+        if (!contact || other.group !== PhysicsGroups.LADDER) return;
+
+        if (this.onLadder) {
+            contact.disabled = true;
             return;
         }
 
-        if (other.group !== PhysicsGroups.WALL) return;
+        const playerBottomY = this.node.worldPosition.y + this.originalColliderOffsetY - this.originalColliderHeight / 2;
+        const box = other as BoxCollider2D;
+        const ladderTopY = other.node.worldPosition.y + box.offset.y + box.size.height / 2;
 
-        this.groundContactCount--;
-        if (this.groundContactCount <= 0) {
-            this.groundContactCount = 0;
-            this.isGrounded = false;
-            this.canReGround = true;
+        if (playerBottomY < ladderTopY - 1) {
+            contact.disabled = true;
         }
     }
 
@@ -472,6 +543,7 @@ export class PlayerController extends Component {
             this._vel.set(this.rigidBody!.linearVelocity);
             this._vel.y = this.stompBounce;
             this.rigidBody!.linearVelocity = this._vel;
+            this.canJump = false;
         } else {
             const enemyX = other.node.worldPosition.x;
             this.takeDamage(enemyX);
@@ -503,9 +575,9 @@ export class PlayerController extends Component {
         if (this.isInvincible && this.curState === STATE.hurt) return;
 
         let newState: STATE;
-        if (this.onLadder || this.nearLadder) {
-            newState = (this.verticalInput !== 0 || this.horizontalInput !== 0) ? STATE.climb : STATE.climbIdle;
-        } else if (!this.isGrounded) {
+        if (this.onLadder) {
+            newState = this.verticalInput !== 0 ? STATE.climb : STATE.climbIdle;
+        } else if (!this.canJump) {
             newState = this.rigidBody.linearVelocity.y > 0 ? STATE.jumpUp : STATE.jumpDown;
         } else if (this.isCrouching) {
             newState = STATE.crouch;
@@ -551,6 +623,8 @@ export class PlayerController extends Component {
         debugNode.layer = this.node.layer;
 
         const g = debugNode.addComponent(Graphics);
+        const footR = this.effectiveFootR;
+        const footCircle = this.footCircle;
         this.scheduleOnce(() => {
             g.clear();
             g.fillColor = this.debugColor.clone();
@@ -565,6 +639,16 @@ export class PlayerController extends Component {
             g.close();
             g.fill();
             g.stroke();
+
+            if (footCircle && footR > 0) {
+                g.circle(
+                    footCircle.offset.x - collider.offset.x,
+                    footCircle.offset.y - collider.offset.y,
+                    footR
+                );
+                g.fill();
+                g.stroke();
+            }
         }, 0);
     }
 }

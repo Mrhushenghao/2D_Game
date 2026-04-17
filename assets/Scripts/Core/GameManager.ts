@@ -1,4 +1,4 @@
-import { _decorator, Component } from 'cc';
+import { _decorator, Component, PhysicsSystem2D } from 'cc';
 
 const { ccclass, property } = _decorator;
 
@@ -29,6 +29,8 @@ export class GameManager extends Component {
         }
         GameManager.instance = this;
         this.hp = this.maxHp;
+
+        PhysicsSystem2D.instance.enable = true;
     }
 
     onDestroy() {

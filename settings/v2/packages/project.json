@@ -23,14 +23,19 @@
       {
         "index": 4,
         "name": "monster"
+      },
+      {
+        "index": 5,
+        "name": "item"
       }
     ],
     "collisionMatrix": {
       "0": 1,
-      "1": 28,
+      "1": 60,
       "2": 18,
       "3": 2,
-      "4": 6
+      "4": 6,
+      "5": 2
     }
   },
   "custom_joint_texture_layouts": []

@@ -49,21 +49,17 @@ export class MonsterSpawner extends Component {
         const parent = new Node('Monsters');
         parent.parent = this.node;
 
-        let count = 0;
         for (const obj of objects) {
             if (obj.visible === false) continue;
             const prefab = this.resolvePrefab(obj);
             if (!prefab) continue;
 
             const monster = instantiate(prefab);
-            const px = (obj as any).offsetX ?? obj.x ?? 0;
-            const py = ((obj as any).offsetY ?? obj.y ?? 0) - (obj.height ?? 0) / 2;
+            const px = ((obj as any).offsetX ?? obj.x ?? 0) + (obj.width ?? 0) / 2;
+            const py = ((obj as any).offsetY ?? obj.y ?? 0) + (obj.height ?? 0) / 2;
             monster.setPosition(px, py, 0);
             monster.parent = parent;
-            count++;
         }
-
-        console.log(`[MonsterSpawner] 生成 ${count} 个怪物`);
     }
 
     private resolvePrefab(obj: TiledMapObject): Prefab | null {
@@ -74,7 +70,6 @@ export class MonsterSpawner extends Component {
         if ('opossum' in props && this.opossumPrefab) return this.opossumPrefab;
         if ('frog' in props && this.frogPrefab) return this.frogPrefab;
 
-        console.warn(`[MonsterSpawner] 未识别的怪物属性:`, props);
         return null;
     }
 }
